@@ -31,7 +31,13 @@ require(path.join(__dirname, "..", "index.js"))({
 
 const log = Object.assign(() => {}, {info() {}, warn() {}, error: (...a) => problems.push(a.join(" ")), debug() {}});
 const api = {hap, on() {}, registerPlatformAccessories() {}};
-const platform = new Platform(log, {platform: "TuyaLan", devices: []}, api);
+let platform;
+try {
+  platform = new Platform(log, {platform: "TuyaLan", devices: []}, api);
+} catch (e) {
+  origLog(`FAIL platform startup: ${e.message}`);
+  process.exit(1);
+}
 
 class FakeDevice extends EventEmitter {
   constructor(context, state) {
