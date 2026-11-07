@@ -58,6 +58,10 @@ const CASES = [
   ["rgbtwlight", {}, {1: true, 2: "white", 3: 255, 4: 128, 5: "ffffff0000ffff"}],
   ["rgbtwlight", {name: "rgbtw-hsb", colorFunction: "HSB", dpPower: 20, dpMode: 21, dpBrightness: 22, dpColorTemperature: 23, dpColor: 24, scaleBrightness: 1000, scaleWhiteColor: 1000},
     {20: true, 21: "colour", 22: 1000, 23: 500, 24: "000003e803e8"}],
+  // A real Tuya RGB-only LED strip (category dd, protocol 3.3), captured while on a scene.
+  // No colorFunction in the config: the HSB format has to be detected from DP 24.
+  ["rgblight", {name: "rgb-strip", dpPower: 20, dpMode: 21, dpColor: 24},
+    {20: false, 21: "scene", 24: "011703e803e8", 25: "c964640200f503e803e800000000646402002203e803e800000000", 26: 0}],
   ["outlet", {voltsId: 20, ampsId: 18, wattsId: 19}, {1: true, 18: 120, 19: 140, 20: 1200}],
   ["rgbtwoutlet", {voltsId: 20, ampsId: 18, wattsId: 19}, {1: true, 2: "white", 3: 255, 4: 128, 5: "ffffff0000ffff", 18: 120, 19: 140, 20: 1200}]
 ];
@@ -77,9 +81,10 @@ function sampleValue(c) {
     const name = ctx.name || type;
     const Cls = CLASS_DEF ? CLASS_DEF[type] : require(path.join(__dirname, "..", "lib", {
       simplelight: "SimpleLightAccessory", simpledimmer: "SimpleDimmerAccessory", twlight: "TWLightAccessory",
-      rgbtwlight: "RGBTWLightAccessory", outlet: "OutletAccessory", rgbtwoutlet: "RGBTWOutletAccessory"
+      rgbtwlight: "RGBTWLightAccessory", rgblight: "RGBLightAccessory", outlet: "OutletAccessory", rgbtwoutlet: "RGBTWOutletAccessory"
     }[type]));
     const device = new FakeDevice({name, type, ...ctx}, state);
+    const original = {...state};
     const accessory = new hap.Accessory(name, hap.uuid.generate(name));
     // Homebridge's PlatformAccessory adds this helper on top of the HAP accessory
     accessory.getServiceByUUIDAndSubType = (s, sub) => accessory.getServiceById(s, sub);
@@ -100,6 +105,18 @@ function sampleValue(c) {
         summary.push(`${service.displayName}[${service.characteristics.map((c) => c.displayName).join(", ")}]`);
       }
       await new Promise((r) => setTimeout(r, 50));
+      // Colour values written back must use the same encoding the device reported
+      // (12-character HSB or 14-character HEXHSB).
+      for (const update of device.updates) {
+        for (const [dp, value] of Object.entries(update)) {
+          const was = original[dp];
+          if (typeof was === "string" && /^[0-9a-f]{12}([0-9a-f]{2})?$/i.test(was) &&
+              !(typeof value === "string" && value.length === was.length && /^[0-9a-f]+$/i.test(value))) {
+            problems.push(`${name} wrote DP ${dp} as ${JSON.stringify(value)}, device format is ${was.length} hex characters`);
+          }
+        }
+      }
+      if (process.env.VERBOSE) origLog(`       writes: ${JSON.stringify(device.updates)}`);
     } catch (e) {
       problems.push(`${name} construct: ${e.stack.split("\n").slice(0, 2).join(" ")}`);
     }
