@@ -23,8 +23,18 @@ console.error = capture(origError);
 console.log = capture(origLog);
 
 let Platform;
+// Stand-in for Homebridge's PlatformAccessory: a HAP accessory plus the helpers the plugin uses
+class PlatformAccessory extends hap.Accessory {
+  constructor(name, uuid, category) {
+    super(name, uuid);
+    if (category === undefined) throw new Error(`PlatformAccessory for ${name} created without a category`);
+    this.category = category;
+  }
+  getServiceByUUIDAndSubType(service, subtype) { return this.getServiceById(service, subtype); }
+}
+
 require(path.join(__dirname, "..", "index.js"))({
-  platformAccessory: class {},
+  platformAccessory: PlatformAccessory,
   hap,
   registerPlatform: (_name, _platform, cls) => { Platform = cls; }
 });
@@ -75,22 +85,18 @@ function sampleValue(c) {
 }
 
 (async () => {
-  const CLASS_DEF = require(path.join(__dirname, "..", "index.js")).CLASS_DEF;
   for (const [type, ctx, state] of CASES) {
     const before = problems.length;
     const name = ctx.name || type;
-    const Cls = CLASS_DEF ? CLASS_DEF[type] : require(path.join(__dirname, "..", "lib", {
-      simplelight: "SimpleLightAccessory", simpledimmer: "SimpleDimmerAccessory", twlight: "TWLightAccessory",
-      rgbtwlight: "RGBTWLightAccessory", rgblight: "RGBLightAccessory", outlet: "OutletAccessory", rgbtwoutlet: "RGBTWOutletAccessory"
-    }[type]));
-    const device = new FakeDevice({name, type, ...ctx}, state);
+    const id = "fake" + hap.uuid.generate(name).replace(/-/g, "").slice(0, 18);
+    const device = new FakeDevice({name, type, id, UUID: hap.uuid.generate(id), ...ctx}, state);
     const original = {...state};
-    const accessory = new hap.Accessory(name, hap.uuid.generate(name));
-    // Homebridge's PlatformAccessory adds this helper on top of the HAP accessory
-    accessory.getServiceByUUIDAndSubType = (s, sub) => accessory.getServiceById(s, sub);
+    let accessory;
     let summary = [];
     try {
-      new Cls(platform, accessory, device, true);
+      // The same path a discovered device takes in the plugin
+      platform.addAccessory(device);
+      accessory = platform.cachedAccessories.get(device.context.UUID).accessory;
       await new Promise((r) => setTimeout(r, 50));
       for (const service of accessory.services) {
         if (service.UUID === hap.Service.AccessoryInformation.UUID) continue;
